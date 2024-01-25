@@ -1588,6 +1588,9 @@ class Blind(BadNet):
 
 
 if __name__ == '__main__':
+    #WXL: address this problem-> Unable to find a valid cuDNN algorithm to run convolution
+    torch.backends.cudnn.enabled = False
+    
     attack = Blind()
     parser = argparse.ArgumentParser(description=sys.argv[0])
     parser = attack.set_args(parser)

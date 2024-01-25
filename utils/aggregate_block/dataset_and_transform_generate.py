@@ -36,6 +36,9 @@ def get_num_classes(dataset_name: str) -> int:
         num_classes = 200
     elif dataset_name == 'imagenet':
         num_classes = 1000
+    #WXL
+    elif dataset_name == '20-imagenet':
+        num_classes = 20
     else:
         raise Exception("Invalid Dataset")
     return num_classes
@@ -71,6 +74,11 @@ def get_input_shape(dataset_name: str) -> Tuple[int, int, int]:
         input_height = 224
         input_width = 224
         input_channel = 3
+    #WXL
+    elif dataset_name == '20-imagenet':
+        input_height = 224
+        input_width = 224
+        input_channel = 3
     else:
         raise Exception("Invalid Dataset")
     return input_height, input_width, input_channel
@@ -91,6 +99,14 @@ def get_dataset_normalization(dataset_name):
     elif dataset_name == "gtsrb" or dataset_name == "celeba":
         dataset_normalization = transforms.Normalize([0, 0, 0], [1, 1, 1])
     elif dataset_name == 'imagenet':
+        dataset_normalization = (
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225],
+            )
+        )
+    #WXL
+    elif dataset_name == '20-imagenet':
         dataset_normalization = (
             transforms.Normalize(
                 mean=[0.485, 0.456, 0.406],
@@ -293,6 +309,31 @@ def dataset_and_transform_generate(args):
                                                           download=True,
                                                           )
         elif args.dataset == "imagenet":
+            from torchvision.datasets import ImageFolder
+
+            def is_valid_file(path):
+                try:
+                    img = Image.open(path)
+                    img.verify()
+                    img.close()
+                    return True
+                except:
+                    return False
+
+            logging.warning("For ImageNet, this script need large size of RAM to load the whole dataset.")
+            logging.debug("We will provide a different script later to handle this problem for backdoor ImageNet.")
+
+            train_dataset_without_transform = ImageFolder(
+                root=f"{args.dataset_path}/train",
+                is_valid_file=is_valid_file,
+            )
+            test_dataset_without_transform = ImageFolder(
+                root=f"{args.dataset_path}/val",
+                is_valid_file=is_valid_file,
+            )
+        
+        #WXL
+        elif args.dataset == "20-imagenet":
             from torchvision.datasets import ImageFolder
 
             def is_valid_file(path):

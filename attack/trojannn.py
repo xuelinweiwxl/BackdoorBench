@@ -114,13 +114,14 @@ def pgd_with_mask_to_selected_neuron(model: torch.nn.Module, images, selected_la
 
 class TrojanTrigger(object):
     def __init__(self, target_image):
-        self.target_image = target_image.astype(np.float)
+        #WXL: `np.float` was a deprecated alias for the builtin `float`. To avoid this error in existing code, use `float` by itself. Doing this will not modify any behavior and is safe.
+        self.target_image = target_image.astype(np.float64)
 
     def __call__(self, img, target=None, image_serial_id=None):
         return self.add_trigger(img)
 
     def add_trigger(self, img):
-        return np.clip((self.target_image + img.astype(np.float)).astype("uint8"), 0, 255)
+        return np.clip((self.target_image + img.astype(np.float64)).astype("uint8"), 0, 255)
 
 
 class TrojanNN(BadNet):

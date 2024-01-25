@@ -70,15 +70,24 @@ class SIG(BadNet):
         ### get the backdoor transform on label
         bd_label_transform = bd_attack_label_trans_generate(args)
 
-        ### 4. set the backdoor attack data and backdoor test data
+        #WXL when num_class is greater than 10, there is an error, so I change the clean_label to false
         train_poison_index = generate_poison_index_from_label_transform(
             clean_train_dataset_targets,
             label_transform=bd_label_transform,
             train=True,
             pratio=args.pratio if 'pratio' in args.__dict__ else None,
             p_num=args.p_num if 'p_num' in args.__dict__ else None,
-            clean_label=True,
+            clean_label=False,
         )
+        ### 4. set the backdoor attack data and backdoor test data
+        # train_poison_index = generate_poison_index_from_label_transform(
+        #     clean_train_dataset_targets,
+        #     label_transform=bd_label_transform,
+        #     train=True,
+        #     pratio=args.pratio if 'pratio' in args.__dict__ else None,
+        #     p_num=args.p_num if 'p_num' in args.__dict__ else None,
+        #     clean_label=True,
+        # )
 
         logging.debug(f"poison train idx is saved")
         torch.save(train_poison_index,

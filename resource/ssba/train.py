@@ -7,6 +7,13 @@ parser.add_argument(
     "--use_celeba_preprocessing",
     action="store_true",
     help="Use CelebA specific preprocessing when loading the images.")
+
+#WXL
+parser.add_argument(
+    "--use_20imagenet_preprocessing",
+    action="store_true",
+    help="Use imagenet specific preprocessing when loading the images.")
+
 parser.add_argument("--output_dir", type=str, required=False, help="Directory to save results to.")
 #
 parser.add_argument("--random_seed", type=int, default=0, help="Fixed random seed.")
@@ -154,6 +161,19 @@ def load_data():
 
     SECRET_SIZE = args.fingerprint_length 
 
+    #WXL
+    if args.use_20imagenet_preprocessing:
+        assert args.image_resolution == 224, f"Image preprocessing requires image resolution 224, got {args.image_resolution}."
+        assert args.use_celeba_preprocessing is False, f"can not use these both."
+        transform = transforms.Compose(
+            [
+                transforms.Resize(256),
+                transforms.CenterCrop(224),
+                transforms.ToTensor(),
+                # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ]
+        )
+        
     if args.use_celeba_preprocessing: 
         assert args.image_resolution == 128, f"CelebA preprocessing requires image resolution 128, got {args.image_resolution}."
         transform = transforms.Compose(
@@ -234,7 +254,7 @@ def main():
     global_step = 0
     steps_since_l2_loss_activated = -1
     
-
+    print(len(dataset))
     for i_epoch in range(args.num_epochs):
         dataloader = DataLoader(
             dataset, batch_size=args.batch_size, shuffle=True, pin_memory=True

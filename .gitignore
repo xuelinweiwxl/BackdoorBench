@@ -3,6 +3,8 @@ data
 record
 resource
 
+# compress file
+*.tar
 
 
 # Byte-compiled / optimized / DLL files

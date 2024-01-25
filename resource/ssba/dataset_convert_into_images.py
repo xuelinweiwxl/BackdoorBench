@@ -31,6 +31,8 @@ def dataset_convert_into_images(dataset_name, dataset_path, image_folder):
     args = Args()
     args.dataset = dataset_name
     args.dataset_path = os.path.join(dataset_path,dataset_name)
+    if dataset_name == '20-imagenet':
+        args.dataset_path = dataset_path
     args.img_size = (32,32,3) 
 
     train_dataset_without_transform, \
