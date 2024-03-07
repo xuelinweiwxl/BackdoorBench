@@ -1,0 +1,4 @@
+python ./attack/wanet.py \
+ --yaml_path ../config/attack/prototype/20-imagenet.yaml \
+ --save_folder_name data_wanet \
+ --device cuda:1

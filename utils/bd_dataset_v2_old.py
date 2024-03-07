@@ -1,6 +1,5 @@
 import os.path
 import sys, logging
-from typing import Callable, Optional, Sequence
 sys.path.append('../')
 
 import numpy as np
@@ -84,7 +83,6 @@ class dataset_wrapper_with_transform(torch.utils.data.Dataset):
         self.wrapped_dataset = obj
         self.wrap_img_transform = wrap_img_transform
         self.wrap_label_transform = wrap_label_transform
-        
 
     def __getattr__(self, attr):
         # # https://github.com/python-babel/flask-babel/commit/8319a7f44f4a0b97298d20ad702f7618e6bdab6a
@@ -95,39 +93,16 @@ class dataset_wrapper_with_transform(torch.utils.data.Dataset):
             return getattr(self, attr)
         return getattr(self.wrapped_dataset, attr)
 
-    """refact for contrast dataloader"""
-    def my_set(self, index_list):
-        self.original_index_array = np.arange(len(index_list))
-    
-    """ refact for grad_iou"""
-    def subset(self, chosen_index_list):
-        self.original_index_array = self.original_index_array[chosen_index_list]
-    
     def __getitem__(self, index):
-        ### 添加
-        # index = self.original_index_array[index]
-        
         img, label, *other_info = self.wrapped_dataset[index]
-        if len(other_info)==2:
-            bd_img, bd_label = other_info[0], other_info[1]
-            if self.wrap_img_transform is not None:
-                img = self.wrap_img_transform(img)
-                bd_img = self.wrap_img_transform(bd_img)
-            if self.wrap_label_transform is not None:
-                label = self.wrap_label_transform(label)
-                bd_label = self.wrap_label_transform(bd_label)
-            return (img, label, bd_img, bd_label)
-        else:
-            if self.wrap_img_transform is not None:
-                img = self.wrap_img_transform(img)
-            if self.wrap_label_transform is not None:
-                label = self.wrap_label_transform(label)
-            return (img, label, *other_info)
+        if self.wrap_img_transform is not None:
+            img = self.wrap_img_transform(img)
+        if self.wrap_label_transform is not None:
+            label = self.wrap_label_transform(label)
+        return (img, label, *other_info)
 
     def __len__(self):
-        ###
-        # return len(self.original_index_array)
-        return len(self.wrapped_dataset)  # 原始
+        return len(self.wrapped_dataset)
     
     def __deepcopy__(self, memo):
         # In copy.deepcopy, init() will not be called and some attr will not be initialized. 
@@ -197,12 +172,6 @@ class poisonedCLSDataContainer:
             return self.data_dict[key]
         else:
             file_path = self.data_dict[key]["path"]
-            while not os.path.exists(file_path):
-                file_path = '/'.join(file_path.split('/')[1:]) 
-                if file_path=='':
-                    print(self.data_dict[key]["path"])
-                    raise IndexError 
-                    
             other_info = self.data_dict[key]["other_info"]
             img =  Image.open(file_path)
             return (img, *other_info)
@@ -312,10 +281,8 @@ class prepro_cls_DatasetBD_v2(torch.utils.data.Dataset):
         return len(self.original_index_array)
 
     def __getitem__(self, index):
-        ###
-        original_index = index
-        # original_index = self.original_index_array[index] # 原始代码
-        
+
+        original_index = self.original_index_array[index]
         if self.poison_indicator[original_index] == 0:
             # clean
             img, label = self.dataset[original_index]
@@ -370,7 +337,9 @@ class prepro_cls_DatasetBD_v2(torch.utils.data.Dataset):
 
     def set_state(self, state_file):
         self.bd_data_container = poisonedCLSDataContainer()
-        self.bd_data_container.set_state(state_file['bd_data_container'])
+        self.bd_data_container.set_state(
+            state_file['bd_data_container']
+        )
         self.getitem_all = state_file['getitem_all']
         self.getitem_all_switch = state_file['getitem_all_switch']
         self.original_index_array = state_file["original_index_array"]
@@ -398,43 +367,3 @@ class xy_iter(torch.utils.data.dataset.Dataset):
         return len(self.targets)
 
 
-
-class contrast_Dataset(prepro_cls_DatasetBD_v2):
-    def __init__(
-            self,
-            full_dataset_without_transform,
-            poison_indicator: Optional[Sequence] = None,  # one-hot to determine which image may take bd_transform
-            bd_image_pre_transform: Optional[Callable] = None,
-            bd_label_pre_transform: Optional[Callable] = None):
-        self.dataset = full_dataset_without_transform
-
-        if poison_indicator is None:
-            poison_indicator = np.zeros(len(full_dataset_without_transform))
-        self.poison_indicator = poison_indicator
-
-        assert len(full_dataset_without_transform) == len(poison_indicator)
-
-        self.bd_image_pre_transform = bd_image_pre_transform
-        self.bd_label_pre_transform = bd_label_pre_transform
-
-        self.original_index_array = np.arange(len(full_dataset_without_transform))
-
-        self.bd_data_container = poisonedCLSDataContainer()
-
-        if sum(self.poison_indicator) >= 1:
-            self.prepro_backdoor()
-
-
-    def __getitem__(self, index):
-
-        original_index = self.original_index_array[index]
-        cln_img, cln_label = self.dataset[original_index]
-        bd_img, bd_label, original_target = self.bd_data_container[original_index]
-        
-        # if not isinstance(cln_img, Image.Image):
-        #     cln_img = ToPILImage()(cln_img)
-        # if not isinstance(bd_img, Image.Image):
-        #     bd_img = ToPILImage()(bd_img)
-            
-        return cln_img, cln_label, bd_img, bd_label
-    
