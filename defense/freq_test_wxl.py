@@ -24,8 +24,17 @@
 This file is modified from spectral.py, in order to test frequency domain defense.
 '''
 
+from torch import Tensor, torch
+from torch.fft import fft2, ifft2, fftshift, ifftshift
+from torchvision import transforms
+from torchvision.utils import _log_api_usage_once
+import time
+import logging
+import yaml
+from pprint import pformat
 import argparse
-import os,sys
+import os
+import sys
 import numpy as np
 import torch
 import torch.nn as nn
@@ -33,13 +42,7 @@ import torch.nn as nn
 sys.path.append('../')
 sys.path.append(os.getcwd())
 
-
-from pprint import  pformat
-import yaml
-import logging
-import time
 from defense.base import defense
-
 from utils.aggregate_block.train_settings_generate import argparser_criterion, argparser_opt_scheduler
 from utils.trainer_cls import PureCleanModelTrainer
 from utils.aggregate_block.fix_random import fix_random
@@ -47,79 +50,148 @@ from utils.aggregate_block.model_trainer_generate import generate_cls_model
 from utils.log_assist import get_git_info
 from utils.aggregate_block.dataset_and_transform_generate import get_input_shape, get_num_classes, get_transform
 from utils.save_load_attack import load_attack_result, save_defense_result
+from utils.trainer_cls import Metric_Aggregator
+
+# the low frequency substitution module
+
+class low_freq_substitution:
+    # now use a fix image
+    def __init__(self, input_height, input_width, low_freq_image, alpha, beta=1) -> None:
+        _log_api_usage_once(self)
+        # the shape of image is [C.H.W]
+        # assert if not match the shape
+        assert low_freq_image.shape[0] == 3 and low_freq_image.shape[
+            1] == input_height and low_freq_image.shape[2] == input_width, 'the shape of low_freq_image should be [3, input_height, input_width]'
+        self.alpha = alpha
+        self.beta = beta
+        self.input_height = input_height
+        self.input_width = input_width
+        # prepare low frequency mask and low frequency fft
+        # shape of low_freq_image_fft is [3, input_height, input_width]
+        low_freq_image_fft = fft2(low_freq_image, dim=(-2, -1))
+        low_freq_image_fft = fftshift(low_freq_image_fft, dim=(-2, -1))
+        low_freq_image_fft = torch.abs(low_freq_image_fft)
+        self.low_freq_image_fft = low_freq_image_fft
+        center = ((input_height-1)/2, (input_width-1)/2)
+        max_radius = min(
+            center[0], center[1], input_height-center[0], input_width-center[1])
+        radius = max_radius*alpha
+        self.mask = torch.zeros(input_height, input_width)
+        for i in range(input_height):
+            for j in range(input_width):
+                if (i-center[0])**2 + (j-center[1])**2 <= radius**2:
+                    self.mask[i][j] = self.beta
+
+    # replace the low frequency part of the image with the low frequency part of a random image
+    def forward(self, tensor: Tensor) -> Tensor:
+        # get the amplitude and phase of the input image
+        tensor_fft = fft2(tensor, dim=(-2, -1))
+        tensor_fft = fftshift(tensor_fft, dim=(-2, -1))
+        tensor_amplitude = torch.abs(tensor_fft)
+        tensor_phase = torch.angle(tensor_fft)
+        # replace low frequency part with self.low_freq_image_fft and mask
+        tensor_amplitude = self.mask * self.low_freq_image_fft + \
+            (1-self.mask) * tensor_amplitude
+        # get the new image tensor
+        tensor_fft = torch.polar(tensor_amplitude, tensor_phase)
+        tensor_fft = ifftshift(tensor_fft, dim=(-2, -1))
+        tensor = ifft2(tensor_fft, dim=(-2, -1))
+        tensor = torch.abs(tensor)
+        return tensor
+
+    def __call__(self, tensor: Tensor) -> Tensor:
+        return self.forward(tensor)
+
+    def __repr__(self) -> str:
+        return f"low_freq_substitution(alpha={self.alpha}, beta={self.beta})"
+
 
 class spectral(defense):
 
-    def __init__(self,args):
+    def __init__(self, args):
         with open(args.yaml_path, 'r') as f:
             defaults = yaml.safe_load(f)
 
-        defaults.update({k:v for k,v in args.__dict__.items() if v is not None})
+        defaults.update(
+            {k: v for k, v in args.__dict__.items() if v is not None})
 
         args.__dict__ = defaults
 
         args.terminal_info = sys.argv
 
         args.num_classes = get_num_classes(args.dataset)
-        args.input_height, args.input_width, args.input_channel = get_input_shape(args.dataset)
-        args.img_size = (args.input_height, args.input_width, args.input_channel)
+        args.input_height, args.input_width, args.input_channel = get_input_shape(
+            args.dataset)
+        args.img_size = (args.input_height, args.input_width,
+                         args.input_channel)
         args.dataset_path = f"{args.dataset_path}/{args.dataset}"
 
         self.args = args
 
-        if 'result_file' in args.__dict__ :
+        if 'result_file' in args.__dict__:
             if args.result_file is not None:
                 self.set_result(args.result_file)
 
     def add_arguments(parser):
         parser.add_argument('--device', type=str, help='cuda, cpu')
 
-        parser.add_argument('--checkpoint_load', type=str, help='the location of load model')
-        parser.add_argument('--checkpoint_save', type=str, help='the location of checkpoint where model is saved')
+        parser.add_argument('--checkpoint_load', type=str,
+                            help='the location of load model')
+        parser.add_argument('--checkpoint_save', type=str,
+                            help='the location of checkpoint where model is saved')
         parser.add_argument('--log', type=str, help='the location of log')
-        parser.add_argument("--dataset_path", type=str, help='the location of data')
-        parser.add_argument('--dataset', type=str, help='mnist, cifar10, cifar100, gtrsb, tiny') 
-        parser.add_argument('--result_file', type=str, help='the location of result')
-    
+        parser.add_argument("--dataset_path", type=str,
+                            help='the location of data')
+        parser.add_argument('--dataset', type=str,
+                            help='mnist, cifar10, cifar100, gtrsb, tiny')
+        parser.add_argument('--result_file', type=str,
+                            help='the location of result')
+
         parser.add_argument('--epochs', type=int)
         parser.add_argument('--batch_size', type=int)
         parser.add_argument("--num_workers", type=float)
         parser.add_argument('--lr', type=float)
-        parser.add_argument('--lr_scheduler', type=str, help='the scheduler of lr')
+        parser.add_argument('--lr_scheduler', type=str,
+                            help='the scheduler of lr')
         parser.add_argument('--steplr_stepsize', type=int)
         parser.add_argument('--steplr_gamma', type=float)
         parser.add_argument('--steplr_milestones', type=list)
         parser.add_argument('--model', type=str, help='resnet18')
-        
+
         parser.add_argument('--client_optimizer', type=int)
         parser.add_argument('--sgd_momentum', type=float)
         parser.add_argument('--wd', type=float, help='weight decay of sgd')
         parser.add_argument('--frequency_save', type=int,
-                        help=' frequency_save, 0 is never')
+                            help=' frequency_save, 0 is never')
 
         parser.add_argument('--random_seed', type=int, help='random seed')
+
+        # parameter related to the frequency domain processing
+        parser.add_argument('--alpha', type=float, default=0.01,
+                             help='the percentage of the low frequency part of the image')
+        parser.add_argument('--beta', type=float, default=1,
+                             help='mask amplification factor')
         # parser.add_argument('--yaml_path', type=str, default="./config/defense/spectral/config.yaml", help='the path of yaml')
 
-        #set the parameter for the spectral defense
-        parser.add_argument('--percentile', type=float)
-        parser.add_argument('--target_label', type=int)
-        
+        # # set the parameter for the spectral defense
+        # parser.add_argument('--percentile', type=float)
+        # parser.add_argument('--target_label', type=int)
 
     def set_result(self, result_file):
         attack_file = './record/' + result_file
         save_path = './record/' + result_file + '/defense/freq_test_wxl/'
         if not (os.path.exists(save_path)):
             os.makedirs(save_path)
-        # assert(os.path.exists(save_path))    
+        # assert(os.path.exists(save_path))
         self.args.save_path = save_path
         if self.args.checkpoint_save is None:
             self.args.checkpoint_save = save_path + 'checkpoint/'
             if not (os.path.exists(self.args.checkpoint_save)):
-                os.makedirs(self.args.checkpoint_save) 
+                os.makedirs(self.args.checkpoint_save)
         if self.args.log is None:
             self.args.log = save_path + 'log/'
             if not (os.path.exists(self.args.log)):
-                os.makedirs(self.args.log)  
+                os.makedirs(self.args.log)
         self.result = load_attack_result(attack_file + '/attack_result.pt')
 
     def set_trainer(self, model):
@@ -135,7 +207,8 @@ class spectral(defense):
         )
         logger = logging.getLogger()
 
-        fileHandler = logging.FileHandler(args.log + '/' + time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime()) + '.log')
+        fileHandler = logging.FileHandler(
+            args.log + '/' + time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime()) + '.log')
         fileHandler.setFormatter(logFormatter)
         logger.addHandler(fileHandler)
 
@@ -150,12 +223,12 @@ class spectral(defense):
             logging.info(pformat(get_git_info()))
         except:
             logging.info('Getting git info fails.')
-   
+
     def set_devices(self):
         self.device = self.args.device
 
     def mitigation(self):
-
+        # set the device and random seed
         self.set_devices()
         fix_random(self.args.random_seed)
 
@@ -165,7 +238,8 @@ class spectral(defense):
         if "," in self.device:
             model = torch.nn.DataParallel(
                 model,
-                device_ids=[int(i) for i in self.args.device[5:].split(",")]  # eg. "cuda:2,3,7" -> [2,3,7]
+                # eg. "cuda:2,3,7" -> [2,3,7]
+                device_ids=[int(i) for i in self.args.device[5:].split(",")]
             )
             self.args.device = f'cuda:{model.device_ids[0]}'
             model.to(self.args.device)
@@ -173,199 +247,117 @@ class spectral(defense):
             model.to(self.args.device)
         logging.info(f'Using device: {self.args.device}')
 
-        
-        
         # Setting up the data and the model
-        train_trans = get_transform(self.args.dataset, *([self.args.input_height,self.args.input_width]) , train = True)
-        
-        train_dataset = self.result['bd_train'].wrapped_dataset
-        data_set_without_tran = train_dataset
-        data_set_o = self.result['bd_train']
-        data_set_o.wrapped_dataset = data_set_without_tran
-        data_set_o.wrap_img_transform = train_tran
-        data_set_o.wrapped_dataset.getitem_all = False
-        dataset = data_set_o
-    
-        # initialize data augmentation
-        logging.info(f'Dataset Size: {len(dataset)}' )
+        train_trans = get_transform(
+            self.args.dataset, *([self.args.input_height, self.args.input_width]), train=True)
+        test_trans = get_transform(
+            self.args.dataset, *([self.args.input_height, self.args.input_width]), train=False)
 
-        if 'target_label' in args.__dict__:
-            if isinstance(self.args.target_label,(int)):
-                poison_labels = [self.args.target_label]
-            else:
-                poison_labels = self.args.target_label
-        else:
-            poison_labels = range(self.args.num_classes)
+        # set the clean trainning dataset and its transform
+        data_clean_trainset = self.result['clean_train']
+        data_clean_trainset.wrap_img_transform = train_trans
+        data_clean_loader = torch.utils.data.DataLoader(data_clean_trainset, batch_size=self.args.batch_size,
+                                                        num_workers=self.args.num_workers, drop_last=False, shuffle=True, pin_memory=args.pin_memory)
 
-        re_all = []
-        for target_label in poison_labels:
-            lbl = target_label
-            dataset_y = []
-            for i in range(len(dataset)):
-                dataset_y.append(dataset[i][1])
-            cur_indices = [i for i,v in enumerate(dataset_y) if v==lbl]
-            cur_examples = len(cur_indices)
-            logging.info(f'Label, num ex: {lbl},{cur_examples}' )
-            
-            model.eval()
-            ### b. get the activation as representation for each data
-            for iex in range(cur_examples):
-                cur_im = cur_indices[iex]
-                x_batch = dataset[cur_im][0].unsqueeze(0).to(self.args.device)
-                y_batch = dataset[cur_im][1]
-                with torch.no_grad():
-                    assert self.args.model in ['preactresnet18', 'vgg19','vgg19_bn', 'resnet18', 'mobilenet_v3_large', 'densenet161', 'efficientnet_b3','convnext_tiny','vit_b_16']
-                    if self.args.model == 'preactresnet18':
-                        inps,outs = [],[]
-                        def layer_hook(module, inp, out):
-                            outs.append(out.data)
-                        hook = model.layer4.register_forward_hook(layer_hook)
-                        _ = model(x_batch)
-                        batch_grads = outs[0].view(outs[0].size(0), -1).squeeze(0)
-                        hook.remove()
-                    elif self.args.model == 'vgg19':
-                        inps,outs = [],[]
-                        def layer_hook(module, inp, out):
-                            outs.append(out.data)
-                        hook = model.features.register_forward_hook(layer_hook)
-                        _ = model(x_batch)
-                        batch_grads = outs[0].view(outs[0].size(0), -1).squeeze(0)
-                        hook.remove()
-                    elif self.args.model == 'vgg19_bn':
-                        inps,outs = [],[]
-                        def layer_hook(module, inp, out):
-                            outs.append(out.data)
-                        hook = model.features.register_forward_hook(layer_hook)
-                        _ = model(x_batch)
-                        batch_grads = outs[0].view(outs[0].size(0), -1).squeeze(0)
-                        hook.remove()
-                    elif self.args.model == 'resnet18':
-                        inps,outs = [],[]
-                        def layer_hook(module, inp, out):
-                            outs.append(out.data)
-                        hook = model.layer4.register_forward_hook(layer_hook)
-                        _ = model(x_batch)
-                        batch_grads = outs[0].view(outs[0].size(0), -1).squeeze(0)
-                        hook.remove()
-                    elif self.args.model == 'mobilenet_v3_large':
-                        inps,outs = [],[]
-                        def layer_hook(module, inp, out):
-                            outs.append(out.data)
-                        hook = model.avgpool.register_forward_hook(layer_hook)
-                        _ = model(x_batch)
-                        batch_grads = outs[0].view(outs[0].size(0), -1).squeeze(0)
-                        hook.remove()
-                    elif self.args.model == 'densenet161':
-                        inps,outs = [],[]
-                        def layer_hook(module, inp, out):
-                            outs.append(out.data)
-                        hook = model.features.register_forward_hook(layer_hook)
-                        _ = model(x_batch)
-                        outs[0] = torch.nn.functional.relu(outs[0])
-                        batch_grads = outs[0].view(outs[0].size(0), -1).squeeze(0)
-                        hook.remove()
-                    elif self.args.model == 'efficientnet_b3':
-                        inps,outs = [],[]
-                        def layer_hook(module, inp, out):
-                            outs.append(out.data)
-                        hook = model.avgpool.register_forward_hook(layer_hook)
-                        _ = model(x_batch)
-                        batch_grads = outs[0].view(outs[0].size(0), -1).squeeze(0)
-                        hook.remove()
-                    elif self.args.model == 'convnext_tiny':
-                        inps,outs = [],[]
-                        def layer_hook(module, inp, out):
-                            outs.append(out.data)
-                        hook = model.avgpool.register_forward_hook(layer_hook)
-                        _ = model(x_batch)
-                        batch_grads = outs[0].view(outs[0].size(0), -1).squeeze(0)
-                        hook.remove()
-                    elif self.args.model == 'vit_b_16':
-                        inps,outs = [],[]
-                        def layer_hook(module, inp, out):
-                            inps.append(inp[0].data)
-                        hook = model[1].heads.register_forward_hook(layer_hook)
-                        _ = model(x_batch)
-                        batch_grads = inps[0].view(inps[0].size(0), -1).squeeze(0)
-                        hook.remove()
-                
-                if iex==0:
-                    full_cov = np.zeros(shape=(cur_examples, len(batch_grads)))
-                full_cov[iex] = batch_grads.detach().cpu().numpy()
-
-            ### c. detect the backdoor data by the SVD decomposition
-            total_p = self.args.percentile            
-            full_mean = np.mean(full_cov, axis=0, keepdims=True)            
-        
-            centered_cov = full_cov - full_mean
-            u,s,v = np.linalg.svd(centered_cov, full_matrices=False)
-            logging.info(f'Top 7 Singular Values: {s[0:7]}')
-            eigs = v[0:1]  
-            p = total_p
-            corrs = np.matmul(eigs, np.transpose(full_cov)) #shape num_top, num_active_indices
-            scores = np.linalg.norm(corrs, axis=0) #shape num_active_indices
-            logging.info(f'Length Scores: {len(scores)}' )
-            p_score = np.percentile(scores, p)
-            top_scores = np.where(scores>p_score)[0]
-            logging.info(f'{top_scores}')
-            
-
-            removed_inds = np.copy(top_scores)
-            re = [cur_indices[v] for i,v in enumerate(removed_inds)]
-            re_all.extend(re)
-            
-        left_inds = np.delete(range(len(dataset)), re_all)
-        ### d. retrain the model with remaining data
-        model = generate_cls_model(self.args.model,self.args.num_classes)
-        if "," in self.device:
-            model = torch.nn.DataParallel(
-                model,
-                device_ids=[int(i) for i in args.device[5:].split(",")]  # eg. "cuda:2,3,7" -> [2,3,7]
-            )
-            self.args.device = f'cuda:{model.device_ids[0]}'
-            model.to(self.args.device)
-        else:
-            model.to(self.args.device)
-        dataset.subset(left_inds)
-        dataset.wrapped_dataset.getitem_all = True
-        # dataset.subset(left_inds)
-        dataset_left = dataset
-        data_loader_sie = torch.utils.data.DataLoader(dataset_left, batch_size=self.args.batch_size, num_workers=self.args.num_workers, shuffle=True)
-        
-        optimizer, scheduler = argparser_opt_scheduler(model, self.args)
-        # criterion = nn.CrossEntropyLoss()
-        self.set_trainer(model)
-        criterion = argparser_criterion(args)
-
-        test_tran = get_transform(self.args.dataset, *([self.args.input_height,self.args.input_width]) , train = False)
+        # set bd dataset and its transform
         data_bd_testset = self.result['bd_test']
-        data_bd_testset.wrap_img_transform = test_tran
-        data_bd_loader = torch.utils.data.DataLoader(data_bd_testset, batch_size=self.args.batch_size, num_workers=self.args.num_workers,drop_last=False, shuffle=True,pin_memory=args.pin_memory)
+        data_bd_testset.wrap_img_transform = test_trans
 
+        # define a new transform for the frequency domain processing
+        # original transform: 0.resize 1.random crop 2.totensor 3.normalize
+        # new transform: 0.resize 1.random crop 2.totensor 3.frequancy domain processing 4.normalize
+        # change the transform of the bd dataset
+        # random choose a low frequency image
+        length = len(data_bd_testset)
+        index = np.random.randint(0, length)
+        low_freq_image = data_bd_testset[index][0]
+        # low frequency image transform
+        low_freq_image_transform = transforms.Compose([
+            transforms.Resize((self.args.input_height, self.args.input_width)),
+            transforms.ToTensor()
+        ])
+        low_freq_image = low_freq_image_transform(low_freq_image)
+        # prepare the low frequency substitution module
+        low_freq_sub = low_freq_substitution(
+            self.args.input_height, self.args.input_width, low_freq_image, self.args.alpha, self.args.beta)
+        # add the low frequency substitution module to the transform
+        logging.info("changing the transform of the bd dataset")
+        logging.info("orignal transforms",test_trans)
+        temp = test_trans[-1]
+        test_trans[-1] = low_freq_sub
+        test_trans.append(temp)
+        logging.info("new transforms",test_trans)
+
+        # add transform to the bd dataset
+        data_bd_testset.wrap_img_transform = test_trans
+
+
+        data_bd_loader = torch.utils.data.DataLoader(data_bd_testset, batch_size=self.args.batch_size,
+                                                     num_workers=self.args.num_workers, drop_last=False, shuffle=False, pin_memory=args.pin_memory)
+
+        # set clean dataset and its transform
         data_clean_testset = self.result['clean_test']
-        data_clean_testset.wrap_img_transform = test_tran
-        data_clean_loader = torch.utils.data.DataLoader(data_clean_testset, batch_size=self.args.batch_size, num_workers=self.args.num_workers,drop_last=False, shuffle=True,pin_memory=args.pin_memory)
+        data_clean_testset.wrap_img_transform = test_trans
+        data_clean_loader = torch.utils.data.DataLoader(data_clean_testset, batch_size=self.args.batch_size,
+                                                        num_workers=self.args.num_workers, drop_last=False, shuffle=False, pin_memory=args.pin_memory)
 
-        self.trainer.train_with_test_each_epoch_on_mix(
-            data_loader_sie,
-            data_clean_loader,
-            data_bd_loader,
-            args.epochs,
+        # set the dataloader dict
+        test_dataloader_dict = {}
+        test_dataloader_dict['clean_test_dataloader'] = data_clean_loader
+        test_dataloader_dict['bd_test_dataloader'] = data_bd_loader
+
+        # set train dataloader
+        train_dataloader = data_clean_loader
+
+        # in order to logging the result together
+        agg = Metric_Aggregator()
+
+        # put the model into trainer handle
+        self.set_trainer(model)
+
+        # get the criterion, optimizer and scheduler
+        # default: cross entropy loss
+        criterion = argparser_criterion(args)
+        # optimizer and scheduler are set by the args
+        optimizer, scheduler = argparser_opt_scheduler(model, self.args)
+
+        # set the dataloader
+        self.trainer.set_with_dataloader(
+            train_dataloader=train_dataloader,
+            test_dataloader_dict=test_dataloader_dict,
             criterion=criterion,
             optimizer=optimizer,
             scheduler=scheduler,
             device=self.args.device,
-            frequency_save=args.frequency_save,
-            save_folder_path=args.save_path,
-            save_prefix='spectral',
-            amp=args.amp,
+            amp=self.args.amp,
+            frequency_save=self.args.frequency_save,
+            save_folder_path=self.args.save_path,
+            save_prefix='freq_test_wxl',
+
+            # default: False, these setting are for prefetching
             prefetch=args.prefetch,
-            prefetch_transform_attr_name="ori_image_transform_in_loading", # since we use the preprocess_bd_dataset
-            non_blocking=args.non_blocking,
+            prefetch_transform_attr_name="ori_image_transform_in_loading",
+            non_blocking=args.non_blocking
         )
 
+        # test the model on clean
+        clean_test_loss_avg_over_batch, \
+            bd_test_loss_avg_over_batch, \
+            test_acc, \
+            test_asr, \
+            test_ra = self.trainer.test_current_model(
+                test_dataloader_dict, args.device
+            )
+
+        agg({
+            "clean_test_loss_avg_over_batch": clean_test_loss_avg_over_batch,
+            "bd_test_loss_avg_over_batch": bd_test_loss_avg_over_batch,
+            "test_acc": test_acc,
+            "test_asr": test_asr,
+            "test_ra": test_ra
+        })
+
         result = {}
-        result["dataset"] = dataset_left
         result['model'] = model
         save_defense_result(
             model_name=args.model,
@@ -375,11 +367,12 @@ class spectral(defense):
         )
         return result
 
-    def defense(self,result_file):
+    def defense(self, result_file):
         self.set_result(result_file)
         self.set_logger()
         result = self.mitigation()
         return result
+
 
 if __name__ == '__main__':
     # must contain two arguments: yaml_path and result_file
@@ -396,5 +389,5 @@ if __name__ == '__main__':
     elif args.yaml_path is None:
         args.yaml_path = './config/defense/freq_test_wxl/20-imagenet.yaml'
     spectral_method = spectral(args)
-    
+
     result = spectral_method.defense(args.result_file)
