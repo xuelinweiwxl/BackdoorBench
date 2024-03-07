@@ -76,11 +76,11 @@ class low_freq_substitution:
         max_radius = min(
             center[0], center[1], input_height-center[0], input_width-center[1])
         radius = max_radius*alpha
-        self.mask = torch.zeros(input_height, input_width)
+        self.mask = torch.ones(input_height, input_width)
         for i in range(input_height):
             for j in range(input_width):
                 if (i-center[0])**2 + (j-center[1])**2 <= radius**2:
-                    self.mask[i][j] = self.beta
+                    self.mask[i][j] = 0
 
     # replace the low frequency part of the image with the low frequency part of a random image
     def forward(self, tensor: Tensor) -> Tensor:
@@ -167,7 +167,7 @@ class spectral(defense):
         parser.add_argument('--random_seed', type=int, help='random seed')
 
         # parameter related to the frequency domain processing
-        parser.add_argument('--alpha', type=float, default=0.01,
+        parser.add_argument('--alpha', type=float, default=0.1,
                              help='the percentage of the low frequency part of the image')
         parser.add_argument('--beta', type=float, default=1,
                              help='mask amplification factor')
@@ -271,21 +271,15 @@ class spectral(defense):
         length = len(data_bd_testset)
         index = np.random.randint(0, length)
         low_freq_image = data_bd_testset[index][0]
-        # low frequency image transform
-        low_freq_image_transform = transforms.Compose([
-            transforms.Resize((self.args.input_height, self.args.input_width)),
-            transforms.ToTensor()
-        ])
-        low_freq_image = low_freq_image_transform(low_freq_image)
         # prepare the low frequency substitution module
         low_freq_sub = low_freq_substitution(
             self.args.input_height, self.args.input_width, low_freq_image, self.args.alpha, self.args.beta)
         # add the low frequency substitution module to the transform
         logging.info("changing the transform of the bd dataset")
         logging.info("orignal transforms",test_trans)
-        temp = test_trans[-1]
-        test_trans[-1] = low_freq_sub
-        test_trans.append(temp)
+        temp = test_trans.transforms[-1]
+        test_trans.transforms[-1] = low_freq_sub
+        test_trans.transforms.append(temp)
         logging.info("new transforms",test_trans)
 
         # add transform to the bd dataset
@@ -381,9 +375,9 @@ if __name__ == '__main__':
     spectral.add_arguments(parser)
     args = parser.parse_args()
     if "result_file" not in args.__dict__:
-        args.result_file = 'badnet_0_1'
+        args.result_file = 'badnet_0_2'
     elif args.result_file is None:
-        args.result_file = 'badnet_0_1'
+        args.result_file = 'badnet_0_2'
     if "yaml_path" not in args.__dict__:
         args.yaml_path = './config/defense/freq_test_wxl/20-imagenet.yaml'
     elif args.yaml_path is None:
