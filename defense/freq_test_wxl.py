@@ -106,7 +106,7 @@ class low_freq_substitution:
         return f"low_freq_substitution(alpha={self.alpha}, beta={self.beta})"
 
 
-class spectral(defense):
+class freq_test_wxl(defense):
 
     def __init__(self, args):
         with open(args.yaml_path, 'r') as f:
@@ -127,13 +127,14 @@ class spectral(defense):
         args.dataset_path = f"{args.dataset_path}/{args.dataset}"
 
         self.args = args
+        self.clean_model = False
 
         if 'result_file' in args.__dict__:
             if args.result_file is not None:
                 self.set_result(args.result_file)
 
     def add_arguments(parser):
-        parser.add_argument('--device', type=str, help='cuda, cpu')
+        parser.add_argument('--device', default='cuda:1', type=str, help='cuda, cpu')
 
         parser.add_argument('--checkpoint_load', type=str,
                             help='the location of load model')
@@ -192,7 +193,24 @@ class spectral(defense):
             self.args.log = save_path + 'log/'
             if not (os.path.exists(self.args.log)):
                 os.makedirs(self.args.log)
-        self.result = load_attack_result(attack_file + '/attack_result.pt')
+        if os.path.exists(attack_file + '/attack_result.pt'):
+            # these code load backdoored model
+            self.result = load_attack_result(attack_file + '/attack_result.pt')
+            logging.info('backdoored model loaded successfully')
+        elif os.path.exists(attack_file + '/info.pickle'):
+            # these code load clean model
+            # load info
+            self.result = {}
+            for key, value in torch.load(attack_file + '/info.pickle').items():
+                if 'model' in key:
+                    self.args.model = value
+                elif 'num_classes' in key:
+                    self.args.num_classes = value
+            self.clean_model = True
+            logging.info('clean model loaded successfully')
+        else:
+            assert False, "no attack_result file or info.pickle"
+            
 
     def set_trainer(self, model):
         self.trainer = PureCleanModelTrainer(
@@ -232,9 +250,7 @@ class spectral(defense):
         self.set_devices()
         fix_random(self.args.random_seed)
 
-        # prepare the model and device
-        model = generate_cls_model(self.args.model, self.args.num_classes)
-        model.load_state_dict(self.result['model'])
+        # setting devices
         if "," in self.device:
             model = torch.nn.DataParallel(
                 model,
@@ -242,11 +258,21 @@ class spectral(defense):
                 device_ids=[int(i) for i in self.args.device[5:].split(",")]
             )
             self.args.device = f'cuda:{model.device_ids[0]}'
-            model.to(self.args.device)
-        else:
-            model.to(self.args.device)
         logging.info(f'Using device: {self.args.device}')
 
+
+        if self.clean_model:
+            model_file = './record/' + self.args.result_file
+            model = generate_cls_model(self.args.model, self.args.num_classes)
+            model.load_state_dict(torch.load(model_file + '/clean_model.pth'))
+            model.to(self.args.device)
+            assert False, "clean model is not supported yet"
+
+        # prepare the model and device
+        model = generate_cls_model(self.args.model, self.args.num_classes)
+        model.load_state_dict(self.result['model'])
+        
+        model.to(self.args.device)
         # Setting up the data and the model
         train_trans = get_transform(
             self.args.dataset, *([self.args.input_height, self.args.input_width]), train=True)
@@ -372,16 +398,16 @@ if __name__ == '__main__':
     # must contain two arguments: yaml_path and result_file
     # i.e. python freq_test_wxl.py --yaml_path ../config/attack/prototype/20-imagenet.yaml --result_file badnet_0_1
     parser = argparse.ArgumentParser(description=sys.argv[0])
-    spectral.add_arguments(parser)
+    freq_test_wxl.add_arguments(parser)
     args = parser.parse_args()
     if "result_file" not in args.__dict__:
-        args.result_file = 'badnet_0_2'
+        args.result_file = '20240119_204623_prototype_attack_prototype_A28B'
     elif args.result_file is None:
-        args.result_file = 'badnet_0_2'
+        args.result_file = '20240119_204623_prototype_attack_prototype_A28B'
     if "yaml_path" not in args.__dict__:
         args.yaml_path = './config/defense/freq_test_wxl/20-imagenet.yaml'
     elif args.yaml_path is None:
         args.yaml_path = './config/defense/freq_test_wxl/20-imagenet.yaml'
-    spectral_method = spectral(args)
+    spectral_method = freq_test_wxl(args)
 
     result = spectral_method.defense(args.result_file)
