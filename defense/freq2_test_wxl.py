@@ -21,7 +21,7 @@
 # SOFTWARE.
 
 '''
-    @file: freq_test_wxl.py
+    @file: freq2_test_wxl.py
     @brief: This file is modified from spectral.py, in order to test frequency domain defense.
     @date: 2021-06-12
     @version: 1.0
@@ -80,80 +80,8 @@ def plot_fft(_image):
     _image_fft = np.abs(_image_fft)
     return _image, _image_fft, _image_tensor
 
-# the low frequency substitution module
 
-
-class low_freq_substitution:
-    # now use a fix image
-    def __init__(self, input_height, input_width, low_freq_image, alpha, beta=1, repalce_mode=1) -> None:
-        _log_api_usage_once(self)
-        # the shape of image is [C.H.W]
-        # assert if not match the shape
-        assert low_freq_image.shape[0] == 3 and low_freq_image.shape[
-            1] == input_height and low_freq_image.shape[2] == input_width, 'the shape of low_freq_image should be [3, input_height, input_width]'
-        self.alpha = alpha
-        self.beta = beta
-        self.input_height = input_height
-        self.input_width = input_width
-        # prepare low frequency mask and low frequency fft
-        # shape of low_freq_image_fft is [3, input_height, input_width]
-        low_freq_image_fft = fft2(low_freq_image, dim=(-2, -1))
-        low_freq_image_fft = fftshift(low_freq_image_fft, dim=(-2, -1))
-        self.low_freq_image_fft_amplitude = torch.abs(low_freq_image_fft)
-        self.low_freq_image_phase = torch.angle(low_freq_image_fft)
-        center = ((input_height-1)/2, (input_width-1)/2)
-        max_radius = min(
-            center[0], center[1], input_height-center[0], input_width-center[1])
-        radius = max_radius*alpha
-        self.mask = torch.zeros(input_height, input_width)
-        for i in range(input_height):
-            for j in range(input_width):
-                if (i-center[0])**2 + (j-center[1])**2 <= radius**2:
-                    self.mask[i][j] = 1
-        # there are three type of replace
-        #   - 0: replace the amplitude of the low frequency part
-        #   - 1: replace the phase of the low frequency part
-        #   - 2: replace both amplitude and phase of the low frequency part
-        self.replace_mode = repalce_mode
-
-    # replace the low frequency part of the image with the low frequency part of a random image
-    def forward(self, tensor: Tensor) -> Tensor:
-        # get the amplitude and phase of the input image
-        tensor_fft = fft2(tensor, dim=(-2, -1))
-        tensor_fft = fftshift(tensor_fft, dim=(-2, -1))
-        tensor_amplitude = torch.abs(tensor_fft)
-        tensor_phase = torch.angle(tensor_fft)
-
-        if self.replace_mode == 0:
-            # replace low frequency part with self.low_freq_image_fft and mask
-            tensor_amplitude = self.beta * self.mask * self.low_freq_image_fft_amplitude + \
-                (1-self.mask) * tensor_amplitude
-        elif self.replace_mode == 1:
-            # replace low frequency part with self.low_freq_image_fft and mask
-            tensor_phase = self.beta * self.mask * self.low_freq_image_phase + \
-                (1-self.mask) * tensor_phase
-        elif self.replace_mode == 2:
-            # replace low frequency part with self.low_freq_image_fft and mask
-            tensor_amplitude = self.beta * self.mask * self.low_freq_image_fft_amplitude + \
-                (1-self.mask) * tensor_amplitude
-            tensor_phase = self.beta * self.mask * self.low_freq_image_phase + \
-                (1-self.mask) * tensor_phase
-
-        # get the new image tensor
-        tensor_fft = torch.polar(tensor_amplitude, tensor_phase)
-        tensor_fft = ifftshift(tensor_fft, dim=(-2, -1))
-        tensor = ifft2(tensor_fft, dim=(-2, -1))
-        tensor = torch.abs(tensor)
-        return tensor
-
-    def __call__(self, tensor: Tensor) -> Tensor:
-        return self.forward(tensor)
-
-    def __repr__(self) -> str:
-        return f"low_freq_substitution(alpha={self.alpha}, beta={self.beta})"
-
-
-class freq_test_wxl(defense):
+class freq2_test_wxl(defense):
 
     def __init__(self, args):
         with open(args.yaml_path, 'r') as f:
@@ -230,7 +158,7 @@ class freq_test_wxl(defense):
 
     def set_result(self, result_file):
         attack_file = './record/' + result_file
-        save_path = './record/' + result_file + '/defense/freq_test_wxl/'
+        save_path = './record/' + result_file + '/defense/freq2_test_wxl/'
         if not (os.path.exists(save_path)):
             os.makedirs(save_path)
         # assert(os.path.exists(save_path))
@@ -304,6 +232,10 @@ class freq_test_wxl(defense):
         # set the device and random seed
         self.set_devices()
         fix_random(self.args.random_seed)
+
+        # Very Important !!!
+        # the number of workers should be set to 0, because we load a model for trans
+        self.args.num_workers = 0
 
         # setting devices
         if "," in self.device:
@@ -417,7 +349,7 @@ class freq_test_wxl(defense):
                 amp=self.args.amp,
                 frequency_save=self.args.frequency_save,
                 save_folder_path=self.args.save_path,
-                save_prefix='freq_test_wxl',
+                save_prefix='freq2_test_wxl',
 
                 # default: False, these setting are for prefetching
                 prefetch=args.prefetch,
@@ -476,15 +408,6 @@ class freq_test_wxl(defense):
             self.result['bd_test'])
         data_bd_testset_without_transform.wrap_img_transform = test_img_transform
 
-        # for test only
-        # for index, data in enumerate(data_bd_testset_without_transform):
-        #     to_PIL = transforms.ToPILImage()
-        #     denormalizer = transforms.Normalize(
-        #         mean=[-0.485/0.229, -0.456/0.224, -0.406/0.225], std=[1/0.229, 1/0.224, 1/0.225])
-        #     data = data[0]
-        #     to_PIL(denormalizer(data)).save(
-        #         f'{self.args.save_path}/bd_img/badtest{index}.png')
-
         # set a clean test dataset and its transform to compare
         data_clean_testset_without_transform = copy.deepcopy(
             self.result['clean_test'])
@@ -492,28 +415,24 @@ class freq_test_wxl(defense):
 
         # define a new transform for the frequency domain processing
         # original transform: 0.resize 1.totensor 2.normalize
-        # new transform: 0.resize 1.totensor 2.frequancy domain processing 3.normalize
-        # change the transform of the bd dataset
-        # random choose a low frequency image
-        # random choose a image from test dataset
+        # new transform: 0.resize 1.totensor 2.normalize(0.5) 3.reconstruction 4.denomalize 5.resize 6.normalize
         # in oder to get a pil image, set wrap_img_transform to None
-        data_clean_testset = self.result['clean_test']
-        data_clean_testset.wrap_img_transform = None
-        length = len(data_clean_testset)
-        index = np.random.randint(0, length)
-        low_freq_image = data_clean_testset[index][0]
-        low_freq_image = transforms.Resize(
-            (self.args.input_height, self.args.input_width))(low_freq_image)
-        low_freq_image = transforms.ToTensor()(low_freq_image)
-        # prepare the low frequency substitution module
-        low_freq_sub = low_freq_substitution(
-            self.args.input_height, self.args.input_width, low_freq_image, self.args.alpha, self.args.beta, self.args.replace_mode)
-        # add the low frequency substitution module to the transform
-        logging.info("changing the transform of the bd dataset")
-        test_trans = copy.deepcopy(test_img_transform)
-        temp = test_trans.transforms[-1]
-        test_trans.transforms[-1] = low_freq_sub
-        test_trans.transforms.append(temp)
+        from FA_VAE.favae_scripts.load_favae import loadfavae
+        print('loading model ............')
+        reconstruction = loadfavae()
+        test_trans = [
+            transforms.Resize(256),
+            transforms.CenterCrop(256),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+            reconstruction,
+            transforms.Normalize(mean=[-1, -1, -1], std=[2, 2, 2]),
+            transforms.ToPILImage(),
+        ]
+        test_trans.extend(copy.deepcopy(test_img_transform.transforms))   
+        test_trans = transforms.Compose(test_trans)
+        
+        logging.info("changing the transform of both datasets")
         logging.info("new transforms", test_trans)
 
         # set bd dataset, transform and dataloader
@@ -681,7 +600,7 @@ class freq_test_wxl(defense):
             amp=self.args.amp,
             frequency_save=self.args.frequency_save,
             save_folder_path=self.args.save_path,
-            save_prefix='freq_test_wxl',
+            save_prefix='freq2_test_wxl',
 
             # default: False, these setting are for prefetching
             prefetch=args.prefetch,
@@ -747,22 +666,22 @@ class freq_test_wxl(defense):
 
 if __name__ == '__main__':
     # must contain two arguments: yaml_path and result_file
-    # i.e. python freq_test_wxl.py --yaml_path ../config/attack/prototype/20-imagenet.yaml --result_file badnet_0_1
+    # i.e. python freq2_test_wxl.py --yaml_path ../config/attack/prototype/20-imagenet.yaml --result_file badnet_0_1
     parser = argparse.ArgumentParser(description=sys.argv[0])
-    freq_test_wxl.add_arguments(parser)
+    freq2_test_wxl.add_arguments(parser)
     args = parser.parse_args()
     # if "result_file" not in args.__dict__:
     #     args.result_file = '20240119_204623_prototype_attack_prototype_A28B'
     # elif args.result_file is None:
     #     args.result_file = '20240119_204623_prototype_attack_prototype_A28B'
     if "result_file" not in args.__dict__:
-        args.result_file = 'cifar10_badnet_0'
+        args.result_file = 'ssba_0_1'
     elif args.result_file is None:
-        args.result_file = 'cifar10_badnet_0'
+        args.result_file = 'ssba_0_1'
     if "yaml_path" not in args.__dict__:
-        args.yaml_path = './config/defense/freq_test_wxl/cifar10.yaml'
+        args.yaml_path = './config/defense/freq_test_wxl/20-imagenet.yaml'
     elif args.yaml_path is None:
-        args.yaml_path = './config/defense/freq_test_wxl/cifar10.yaml'
-    spectral_method = freq_test_wxl(args)
+        args.yaml_path = './config/defense/freq_test_wxl/20-imagenet.yaml'
+    spectral_method = freq2_test_wxl(args)
 
     result = spectral_method.defense(args.result_file)

@@ -1,4 +1,4 @@
-device: 'cuda'
+device: 'cuda:1'
 amp: True
 pin_memory: True
 non_blocking: True

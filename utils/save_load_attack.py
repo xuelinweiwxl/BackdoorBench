@@ -172,6 +172,33 @@ def load_attack_result(
         'bd_test',
         ]):
 
+        # WXL: 2021-06-12
+        # important: the file path is not save as relative path, so the file path is not correct
+        # only for bd_test and bd_train
+        # so we need to change the file path to the correct path
+        # change from inner dict to outer dict
+        # 1. bd_test:
+        #    - ['bd_test']['bd_data_container']['data_dict']
+        #    - ['bd_test']['bd_data_container']['save_folder_path']
+        #    - ['bd_test']['save_folder_path']
+        data_dict = load_file['bd_test']['bd_data_container']['data_dict']
+        for k,v in data_dict.items():
+            data_dict[k]['path'] = './' + data_dict[k]['path'].split('/BackdoorBench/')[1]
+        save_folder_path = load_file['bd_test']['bd_data_container']['save_folder_path']
+        load_file['bd_test']['bd_data_container']['save_folder_path'] = './' + save_folder_path.split('/BackdoorBench/')[1]
+        load_file['bd_test']['save_folder_path'] = './' + save_folder_path.split('/BackdoorBench/')[1]
+        # 2. bd_train:
+        #    - ['bd_test']['bd_data_container']['data_dict']
+        #    - ['bd_test']['bd_data_container']['save_folder_path']
+        #    - ['bd_test']['save_folder_path']
+        data_dict = load_file['bd_train']['bd_data_container']['data_dict']
+        for k,v in data_dict.items():
+            data_dict[k]['path'] = './' + data_dict[k]['path'].split('/BackdoorBench/')[1]
+        save_folder_path = load_file['bd_train']['bd_data_container']['save_folder_path']
+        load_file['bd_train']['bd_data_container']['save_folder_path'] = './' + save_folder_path.split('/BackdoorBench/')[1]
+        load_file['bd_train']['save_folder_path'] = './' + save_folder_path.split('/BackdoorBench/')[1]
+            
+
         logging.info('key match for attack_result, processing...')
 
         # model = generate_cls_model(load_file['model_name'], load_file['num_classes'])

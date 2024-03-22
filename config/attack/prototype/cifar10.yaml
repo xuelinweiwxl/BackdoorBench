@@ -3,7 +3,8 @@ pin_memory: True
 non_blocking: True
 prefetch: False
 amp: False
-device: cuda:0
+
+device: cuda:1
 client_optimizer: sgd
 dataset: cifar10
 dataset_path: ../data
