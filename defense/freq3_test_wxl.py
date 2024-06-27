@@ -21,7 +21,7 @@
 # SOFTWARE.
 
 '''
-    @file: freq2_test_wxl.py
+    @file: freq3_test_wxl.py
     @brief: This file is modified from spectral.py, in order to test frequency domain defense.
     @date: 2021-06-12
     @version: 1.0
@@ -64,8 +64,11 @@ from utils.save_load_attack import load_attack_result, save_defense_result
 from utils.trainer_cls import Metric_Aggregator
 
 
-# visual module
-
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+from focal_frequency_loss import FocalFrequencyLoss as FFL
+import seaborn as sns
+import datetime
 
 def plot_fft(_image):
     to_tensor = transforms.ToTensor()
@@ -80,8 +83,218 @@ def plot_fft(_image):
     _image_fft = np.abs(_image_fft)
     return _image, _image_fft, _image_tensor
 
+def visualize_fft(images, dataset_index, transformed_test_savepath, alpha=0.1):
+    length = len(images)
+    column = 8
+    fig = plt.figure(figsize=(50, length*8))
+    ffl = FFL(loss_weight=10.0, alpha=1.0)
+    for index, image in enumerate(images):
+        image, image_fft, image_tensor = plot_fft(image)
+        input_height, input_width = image_fft.shape
+        
+        # # remove center part
+        # alpha = 0.1
+        # image_fft = image_fft.detach().clone()
+        # center = ((input_height-1)/2, (input_width-1)/2)
+        # max_radius = min(
+        #     center[0], center[1], input_height-center[0], input_width-center[1])
+        # radius = max_radius*alpha
+        # for i in range(input_height):
+        #     for j in range(input_width):
+        #         if (center[0]-i)**2 + (center[1]-j)**2 < radius**2:
+        #             image_fft[i, j] = 0
 
-class freq2_test_wxl(defense):
+        if index == 0:
+            original_image_fft = image_fft
+            orignal_image_tensor = image_tensor.clone()
+            orignal_image_tensor = orignal_image_tensor.unsqueeze(0)
+        fig.add_subplot(length, column, index*column+1)
+        plt.imshow(image)
+        plt.title(dataset_index, fontsize=40)
+        plt.axis('off')
+        # show original image on the above row
+        fig.add_subplot(length, column, index*column+2)
+        sns.heatmap(np.log(original_image_fft+1),
+                    cmap='viridis', cbar=False)
+        plt.axis('off')
+        plt.title('log view of orgin fft', fontsize=20)
+        # # # show fft heatmap on the below row
+        fig.add_subplot(length, column, index*column+3)
+        sns.heatmap(np.log(image_fft+1), cmap='viridis', cbar=False)
+        plt.axis('off')
+        plt.title('log view of backdoored fft', fontsize=20)
+        fig.add_subplot(length, column, index*column+4)
+        fft_diff = image_fft - original_image_fft
+        sns.heatmap(np.abs(fft_diff), cmap='viridis', cbar=False)
+        plt.axis('off')
+        image_tensor = image_tensor.unsqueeze(0)
+        fflloss = ffl(image_tensor, orignal_image_tensor)
+        plt.title(f'log view of fft difference', fontsize=20)
+        # fig.add_subplot(length, column, index*column+5)
+        # fft_diff = image_fft - original_image_fft
+        # sns.heatmap(np.log(np.abs(fft_diff)+1),
+        #             cmap='viridis', cbar=False)
+        # plt.axis('off')
+        # plt.title('diff log view', fontsize=20)
+        # fig.add_subplot(length, column, index*column+6)
+        # fft_diff_1 = fft_diff.detach().clone()
+        # fft_diff_1[fft_diff < 0] = 0
+        # sns.heatmap(np.log(np.abs(fft_diff_1)+1),
+        #             cmap='viridis', cbar=False)
+        # plt.axis('off')
+        # plt.title('Positive diff', fontsize=20)
+        # fig.add_subplot(length, column, index*column+7)
+        # fft_diff_2 = fft_diff.detach().clone()
+        # fft_diff_2[fft_diff > 0] = 0
+        # sns.heatmap(np.log(np.abs(fft_diff_2)+1),
+        #             cmap='viridis', cbar=False)
+        # plt.axis('off')
+        # plt.title('Negative diff', fontsize=20)
+        fig.add_subplot(length, column, index*column+5)
+        # ffta = fft_diff.detach().clone().numpy()
+        # ffta = np.square(ffta)
+        ffta = image_fft.detach().clone().numpy()
+        ffta = np.abs(ffta)
+        # get center of the fft
+        h, w = ffta.shape
+        center = (h-1)/2, (w-1)/2
+        # get the radius of the fft
+        max_radius = center[0]**2 + center[1]**2
+        max_radius = int(np.ceil(np.sqrt(max_radius)))
+        # create a blank array to store the fft's distribution
+        fft_distribution = np.zeros(max_radius, dtype=np.float32)
+        # calculate the fft's distribution
+        for i in range(h):
+            for j in range(w):
+                radius = int(
+                    np.ceil(np.sqrt((i-center[0])**2 + (j-center[1])**2)))
+                fft_distribution[radius-1] += ffta[i, j]
+        # normalize the fft's distribution
+        fft_distribution = fft_distribution / np.sum(fft_distribution)
+        if index == 0:
+            fft_distribution_o = fft_distribution
+        # else:
+        #     fft_distribution = fft_distribution - fft_distribution_o
+        # plot the fft's distribution
+        plt.plot(fft_distribution_o)
+        plt.ylim(0, 0.2)
+        plt.grid()
+        fig.add_subplot(length, column, index*column+6)
+        plt.plot(fft_distribution_o)
+        plt.plot(fft_distribution)
+        plt.ylim(0, 0.2)
+        plt.grid()
+        title = ''
+        title += 'mse:'
+        mse = np.mean(np.square(fft_distribution-fft_distribution_o))
+        title += str(mse)
+        title += '\n'
+        title += 'corrcoef:'
+        correlation_matrix = np.corrcoef(fft_distribution, fft_distribution_o)
+        # print(namelist[index],1.0-correlation_matrix[0,1])
+        title += str((1.0-correlation_matrix[0,1])*100)
+        # plt.title(title, fontsize=20)
+    if transformed_test_savepath is not None:
+        fig.savefig(f'{transformed_test_savepath}/result.png')
+    else:
+        fig.show()
+
+
+# def visualize_fft(images, dataset_index, transformed_test_savepath):
+#     length = len(images)
+#     column = 10
+#     fig = plt.figure(figsize=(50, length*10))
+#     ffl = FFL(loss_weight=1.0, alpha=1.0)
+#     for index, image in enumerate(images):
+#         image, image_fft, image_tensor = plot_fft(image)
+#         if index == 0:
+#             original_image_fft = image_fft
+#             orignal_image_tensor = image_tensor.clone()
+#             orignal_image_tensor = orignal_image_tensor.unsqueeze(0)
+#         fig.add_subplot(length, column, index*column+1)
+#         plt.imshow(image)
+#         plt.title(f'{dataset_index}', fontsize=40)
+#         plt.axis('off')
+#         # show original image on the above row
+#         fig.add_subplot(length, column, index*column+2)
+#         sns.heatmap(np.log(original_image_fft+1),
+#                     cmap='viridis', cbar=False)
+#         plt.axis('off')
+#         plt.title('log view of orgin fft', fontsize=20)
+#         # # show fft heatmap on the below row
+#         fig.add_subplot(length, column, index*column+3)
+#         sns.heatmap(np.log(image_fft+1), cmap='viridis', cbar=False)
+#         plt.axis('off')
+#         plt.title('log view of backdoored fft', fontsize=20)
+#         fig.add_subplot(length, column, index*column+4)
+#         fft_diff = image_fft - original_image_fft
+#         sns.heatmap(np.abs(fft_diff), cmap='viridis', cbar=False)
+#         plt.axis('off')
+#         image_tensor = image_tensor.unsqueeze(0)
+#         fflloss = ffl(image_tensor, orignal_image_tensor)
+#         plt.title(f'FFL: {fflloss:.8f}', fontsize=40)
+#         fig.add_subplot(length, column, index*column+5)
+#         fft_diff = image_fft - original_image_fft
+#         sns.heatmap(np.log(np.abs(fft_diff)+1),
+#                     cmap='viridis', cbar=False)
+#         plt.axis('off')
+#         plt.title('diff log view', fontsize=20)
+#         fig.add_subplot(length, column, index*column+6)
+#         fft_diff_1 = fft_diff.detach().clone()
+#         fft_diff_1[fft_diff < 0] = 0
+#         sns.heatmap(np.log(np.abs(fft_diff_1)+1),
+#                     cmap='viridis', cbar=False)
+#         plt.axis('off')
+#         plt.title('Positive diff', fontsize=20)
+#         fig.add_subplot(length, column, index*column+7)
+#         fft_diff_2 = fft_diff.detach().clone()
+#         fft_diff_2[fft_diff > 0] = 0
+#         sns.heatmap(np.log(np.abs(fft_diff_2)+1),
+#                     cmap='viridis', cbar=False)
+#         plt.axis('off')
+#         plt.title('Negative diff', fontsize=20)
+#         fig.add_subplot(length, column, index*column+8)
+#         ffta = fft_diff.detach().clone().numpy()
+#         ffta = np.square(ffta)
+#         # get center of the fft
+#         h, w = ffta.shape
+#         center = (h-1)/2, (w-1)/2
+#         # get the radius of the fft
+#         max_radius = center[0]**2 + center[1]**2
+#         max_radius = int(np.ceil(np.sqrt(max_radius)))
+#         # create a blank array to store the fft's distribution
+#         fft_distribution = np.zeros(max_radius, dtype=np.float32)
+#         # calculate the fft's distribution
+#         for i in range(h):
+#             for j in range(w):
+#                 radius = int(
+#                     np.ceil(np.sqrt((i-center[0])**2 + (j-center[1])**2)))
+#                 fft_distribution[radius-1] += ffta[i, j]
+#         # plot the fft's distribution
+#         plt.plot(fft_distribution)
+#         fig.add_subplot(length, column, index*column+9)
+#         plt.plot(fft_distribution[:int(
+#             np.floor(min(center[0], center[1])))])
+#         fig.add_subplot(length, column, index*column+10)
+#         plt.plot(fft_distribution[10:int(
+#             np.floor(min(center[0], center[1])))])
+#     fig.savefig(f'{transformed_test_savepath}/{dataset_index}.png')
+
+# def plot_fft(_image):
+#     to_tensor = transforms.ToTensor()
+#     _image_tensor = to_tensor(_image)
+#     if _image_tensor.shape[1] >= 244 or _image_tensor.shape[2] >= 244:
+#         _image_tensor = transforms.transforms.Resize((224, 224))(_image_tensor)
+#     _image_fft = fft2(_image_tensor)
+#     _image_fft = fftshift(_image_fft)
+#     to_PIL = transforms.ToPILImage()
+#     _image = to_PIL(_image_tensor)
+#     _image_fft = _image_fft.sum(axis=0)
+#     _image_fft = np.abs(_image_fft)
+#     return _image, _image_fft, _image_tensor
+
+
+class freq3_test_wxl(defense):
 
     def __init__(self, args):
         with open(args.yaml_path, 'r') as f:
@@ -109,7 +322,7 @@ class freq2_test_wxl(defense):
                 self.set_result(args.result_file)
 
     def add_arguments(parser):
-        parser.add_argument('--device', default='cuda:1',
+        parser.add_argument('--device', default='cuda:0',
                             type=str, help='cuda, cpu')
 
         parser.add_argument('--checkpoint_load', type=str,
@@ -144,7 +357,7 @@ class freq2_test_wxl(defense):
         parser.add_argument('--random_seed', type=int, help='random seed')
 
         # parameter related to the frequency domain processing
-        parser.add_argument('--alpha', type=float, default=0.09,
+        parser.add_argument('--alpha', type=float, default=0.15,
                             help='the percentage of the low frequency part of the image')
         parser.add_argument('--beta', type=float, default=1,
                             help='mask amplification factor')
@@ -158,7 +371,7 @@ class freq2_test_wxl(defense):
 
     def set_result(self, result_file):
         attack_file = './record/' + result_file
-        save_path = './record/' + result_file + '/defense/freq2_test_wxl/'
+        save_path = './record/' + result_file + '/defense/freq3_test_wxl/'
         if not (os.path.exists(save_path)):
             os.makedirs(save_path)
         # assert(os.path.exists(save_path))
@@ -349,7 +562,7 @@ class freq2_test_wxl(defense):
                 amp=self.args.amp,
                 frequency_save=self.args.frequency_save,
                 save_folder_path=self.args.save_path,
-                save_prefix='freq2_test_wxl',
+                save_prefix='freq3_test_wxl',
 
                 # default: False, these setting are for prefetching
                 prefetch=args.prefetch,
@@ -412,30 +625,86 @@ class freq2_test_wxl(defense):
         data_clean_testset_without_transform = copy.deepcopy(
             self.result['clean_test'])
         data_clean_testset_without_transform.wrap_img_transform = test_img_transform
-
+        
         # define a new transform for the frequency domain processing
         # original transform: 0.resize 1.totensor 2.normalize
         # new transform: 0.resize 1.totensor 2.normalize(0.5) 3.reconstruction 4.denomalize 5.resize 6.normalize
         # in oder to get a pil image, set wrap_img_transform to None
-        from FA_VAE.favae_scripts.load_favae import loadfavae
-        print('loading model ............')
-        reconstruction = loadfavae()
-        test_trans = [
-            transforms.Resize(256),
-            transforms.CenterCrop(256),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
-            reconstruction,
-            transforms.Normalize(mean=[-1, -1, -1], std=[2, 2, 2]),
-            transforms.ToPILImage(),
-        ]
+        defense_mode = True
+        normal_reconstruction = False
+        reconstruction_device = torch.device("cuda:0")
+        # result_dir = '/data/wxl/code/FreqDefense/results/trn3/test'
+            # res = 32
+        result_dir = '/data/wxl/code/FreqDefense/results/trn3-224/test15'
+        res = 224
+        import albumentations as A
+
+        class Distortion2(nn.Module):
+            def __init__(self):
+                super(Distortion2, self).__init__()
+                self.od = A.OpticalDistortion(distort_limit=(-0.5, 0.5)) 
+            def forward(self, img):
+                img = self.od(image=img)['image']
+                return img
+
+
+        if defense_mode:
+            sys.path.append('/data/wxl/code/FreqDefense')
+            from FreqDefense.models.model_utils import load_model_trn, load_model
+            print('loading model ............')
+            reconstruction_list = load_model_trn(result_dir, reconstruction_device, best=True)
+                # reconstruction_list = load_model(result_dir, reconstruction_device, best=False)
+            test_trans = [
+                transforms.Resize((res,res)),
+                transforms.CenterCrop(res),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ]
+            class Clip:
+                def __call__(self, img):
+                    return torch.clamp(img, 0, 1)
+            if normal_reconstruction:
+                print('----------------------------------ONLY RECONSTRUCTION------------------------------------------------------------------')
+                reconstruction = reconstruction_list[0]
+                test_trans.extend([
+                        reconstruction,
+                        transforms.Normalize(mean=[-0.485/0.229, -0.456/0.224, -0.406/0.225], std=[1/0.229, 1/0.224, 1/0.225]),
+                        Clip(),
+                        transforms.ToPILImage(),
+                    ])
+            else:
+                reconstruction, low_freq_sub, high_noise = reconstruction_list[0], reconstruction_list[1], reconstruction_list[2]
+                data_clean_testset = self.result['clean_test']
+                data_clean_testset.wrap_img_transform = None
+                length = len(data_clean_testset)
+                index = np.random.randint(0, length)
+                low_freq_image = data_clean_testset[index][0]
+                low_freq_image = transforms.Compose(test_trans)(low_freq_image)
+                print(low_freq_image.shape)
+                low_freq_sub.update(low_freq_image)
+                alpha = 0.2
+                scale = 1
+                low_freq_sub.update_alpha(alpha)
+                high_noise.update_alpha(alpha)
+                high_noise.update_scale(scale)
+                distortion = Distortion2()
+                test_trans.extend([
+                    low_freq_sub,
+                    high_noise,
+                    reconstruction,
+                    # transforms.Normalize(mean=[-1, -1, -1], std=[2, 2, 2]),
+                    transforms.Normalize(mean=[-0.485/0.229, -0.456/0.224, -0.406/0.225], std=[1/0.229, 1/0.224, 1/0.225]),
+                    Clip(),
+                    transforms.ToPILImage(),
+                    # distortion
+                ])
+        else:
+            test_trans = []
+
+        
         test_trans.extend(copy.deepcopy(test_img_transform.transforms))   
         test_trans = transforms.Compose(test_trans)
-        
         logging.info("changing the transform of both datasets")
-        logging.info("new transforms", test_trans)
-
-        test_trans = copy.deepcopy(test_img_transform)
 
         # set bd dataset, transform and dataloader
         data_bd_testset = self.result['bd_test']
@@ -449,6 +718,7 @@ class freq2_test_wxl(defense):
         data_clean_test_loader = torch.utils.data.DataLoader(data_clean_testset, batch_size=self.args.batch_size,
                                                              num_workers=self.args.num_workers, drop_last=False, shuffle=False, pin_memory=args.pin_memory)
 
+        tic = time.time()
         '''
             This part is for visualization
         '''
@@ -464,13 +734,13 @@ class freq2_test_wxl(defense):
             os.makedirs(transformed_test_savepath)
         len_bd = len(data_bd_testset_without_transform)
         len_clean = len(data_clean_testset_without_transform)
-        distance = len_clean-len_bd
+        distance = len_clean - len_bd
         # random select 5 images from the test dataset
         random_index = np.random.randint(0, len_bd, 1)
         for _, dataset_index in tqdm(enumerate(random_index)):
             to_PIL = transforms.ToPILImage()
-            denormalizer = transforms.Normalize(
-                mean=[-0.485/0.229, -0.456/0.224, -0.406/0.225], std=[1/0.229, 1/0.224, 1/0.225])
+            denormalizer = transforms.Normalize(mean=[-0.485/0.229, -0.456/0.224, -0.406/0.225], std=[1/0.229, 1/0.224, 1/0.225])
+            # denormalizer = transforms.Normalize(mean=[-0.5/0.5, -0.5/0.5, -0.5/0.5], std=[1/0.5, 1/0.5, 1/0.5])
 
             # there are some bugs need to be fixed:
             #   - for the cifar10, the clean dataset and bd dataset is not matched
@@ -493,86 +763,9 @@ class freq2_test_wxl(defense):
             imgs.append(to_PIL(denormalizer(bd_img)))
             imgs.append(to_PIL(denormalizer(transformed_bd_img)))
 
-            length = len(imgs)
-            fig = plt.figure(figsize=(50, length*10))
-            ffl = FFL(loss_weight=1.0, alpha=1.0)
             original_image_fft = 0
             orignal_image_tensor = 0
-            column = 10
-            for index, image in enumerate(imgs):
-                image, image_fft, image_tensor = plot_fft(image)
-                if index == 0:
-                    original_image_fft = image_fft
-                    orignal_image_tensor = image_tensor.clone()
-                    orignal_image_tensor = orignal_image_tensor.unsqueeze(0)
-                fig.add_subplot(length, column, index*column+1)
-                plt.imshow(image)
-                plt.title(f'{dataset_index}', fontsize=40)
-                plt.axis('off')
-                # show original image on the above row
-                fig.add_subplot(length, column, index*column+2)
-                sns.heatmap(np.log(original_image_fft+1),
-                            cmap='viridis', cbar=False)
-                plt.axis('off')
-                plt.title('log view of orgin fft', fontsize=20)
-                # # show fft heatmap on the below row
-                fig.add_subplot(length, column, index*column+3)
-                sns.heatmap(np.log(image_fft+1), cmap='viridis', cbar=False)
-                plt.axis('off')
-                plt.title('log view of backdoored fft', fontsize=20)
-                fig.add_subplot(length, column, index*column+4)
-                fft_diff = image_fft - original_image_fft
-                sns.heatmap(np.abs(fft_diff), cmap='viridis', cbar=False)
-                plt.axis('off')
-                image_tensor = image_tensor.unsqueeze(0)
-                fflloss = ffl(image_tensor, orignal_image_tensor)
-                plt.title(f'FFL: {fflloss:.8f}', fontsize=40)
-                fig.add_subplot(length, column, index*column+5)
-                fft_diff = image_fft - original_image_fft
-                sns.heatmap(np.log(np.abs(fft_diff)+1),
-                            cmap='viridis', cbar=False)
-                plt.axis('off')
-                plt.title('diff log view', fontsize=20)
-                fig.add_subplot(length, column, index*column+6)
-                fft_diff_1 = fft_diff.detach().clone()
-                fft_diff_1[fft_diff < 0] = 0
-                sns.heatmap(np.log(np.abs(fft_diff_1)+1),
-                            cmap='viridis', cbar=False)
-                plt.axis('off')
-                plt.title('Positive diff', fontsize=20)
-                fig.add_subplot(length, column, index*column+7)
-                fft_diff_2 = fft_diff.detach().clone()
-                fft_diff_2[fft_diff > 0] = 0
-                sns.heatmap(np.log(np.abs(fft_diff_2)+1),
-                            cmap='viridis', cbar=False)
-                plt.axis('off')
-                plt.title('Negative diff', fontsize=20)
-                fig.add_subplot(length, column, index*column+8)
-                ffta = fft_diff.detach().clone().numpy()
-                ffta = np.square(ffta)
-                # get center of the fft
-                h, w = ffta.shape
-                center = (h-1)/2, (w-1)/2
-                # get the radius of the fft
-                max_radius = center[0]**2 + center[1]**2
-                max_radius = int(np.ceil(np.sqrt(max_radius)))
-                # create a blank array to store the fft's distribution
-                fft_distribution = np.zeros(max_radius, dtype=np.float32)
-                # calculate the fft's distribution
-                for i in range(h):
-                    for j in range(w):
-                        radius = int(
-                            np.ceil(np.sqrt((i-center[0])**2 + (j-center[1])**2)))
-                        fft_distribution[radius-1] += ffta[i, j]
-                # plot the fft's distribution
-                plt.plot(fft_distribution)
-                fig.add_subplot(length, column, index*column+9)
-                plt.plot(fft_distribution[:int(
-                    np.floor(min(center[0], center[1])))])
-                fig.add_subplot(length, column, index*column+10)
-                plt.plot(fft_distribution[10:int(
-                    np.floor(min(center[0], center[1])))])
-            fig.savefig(f'{transformed_test_savepath}/{dataset_index}.png')
+            visualize_fft(imgs, dataset_index, transformed_test_savepath)
 
         # set the dataloader dict
         test_dataloader_dict = {}
@@ -602,7 +795,7 @@ class freq2_test_wxl(defense):
             amp=self.args.amp,
             frequency_save=self.args.frequency_save,
             save_folder_path=self.args.save_path,
-            save_prefix='freq2_test_wxl',
+            save_prefix='freq3_test_wxl',
 
             # default: False, these setting are for prefetching
             prefetch=args.prefetch,
@@ -636,16 +829,22 @@ class freq2_test_wxl(defense):
             model=model.cpu().state_dict(),
             save_path=args.save_path,
         )
+        toc = time.time()
+        print(f"Time cost: {(toc-tic)/60:.2f} min")
 
         # save to csv
         import pandas as pd
         # first, read the result.csv before
-        csv_result_save_path = self.args.save_path+'/results/result.csv'
+        tmp1 = args.yaml_path.split('/')[-1].split('.')[0]
+        tmp2 = result_dir.split('/')[-1]
+        csv_result_save_path = f'./{tmp1}_{tmp2}_{alpha}_{scale}_result.csv'
         result_dict = {
+            "attack":args.result_file,
             "experiment_time": experiment_time,
             "replace_mode": self.args.replace_mode,
             "alpha": self.args.alpha,
             "beta": self.args.beta,
+            "scale": scale,
             "test_acc": test_acc,
             "test_asr": test_asr,
             "test_ra": test_ra,
@@ -668,22 +867,62 @@ class freq2_test_wxl(defense):
 
 if __name__ == '__main__':
     # must contain two arguments: yaml_path and result_file
-    # i.e. python freq2_test_wxl.py --yaml_path ../config/attack/prototype/20-imagenet.yaml --result_file badnet_0_1
+    # i.e. python freq3_test_wxl.py --yaml_path ../config/attack/prototype/20-imagenet.yaml --result_file badnet_0_1
     parser = argparse.ArgumentParser(description=sys.argv[0])
-    freq2_test_wxl.add_arguments(parser)
+    freq3_test_wxl.add_arguments(parser)
     args = parser.parse_args()
     # if "result_file" not in args.__dict__:
     #     args.result_file = '20240119_204623_prototype_attack_prototype_A28B'
     # elif args.result_file is None:
     #     args.result_file = '20240119_204623_prototype_attack_prototype_A28B'
-    if "result_file" not in args.__dict__:
-        args.result_file = 'badnet_0_2'
-    elif args.result_file is None:
-        args.result_file = 'badnet_0_2'
+    
+    result_file_list=["imagenette-320_blended_0",
+                      "imagenette-320_badnet_0",
+                      "imagenette-320_sig_0",
+                     "imagenette-320_wanet_0",
+                     "imagenette-320_trojannn_0",
+                      "imagenette-320_inputaware_0",
+                      "imagenette-320_bpp_0",
+                      "imagenette-320_lf_0",
+                      "imagenette-320_ssba_0"]
+    
     if "yaml_path" not in args.__dict__:
-        args.yaml_path = './config/defense/freq_test_wxl/20-imagenet.yaml'
+        args.yaml_path = './config/defense/freq_test_wxl/imagenette-320.yaml'
     elif args.yaml_path is None:
-        args.yaml_path = './config/defense/freq_test_wxl/20-imagenet.yaml'
-    spectral_method = freq2_test_wxl(args)
+        args.yaml_path = './config/defense/freq_test_wxl/imagenette-320.yaml'
+    for result_file in result_file_list:
+        args.result_file = result_file
+        spectral_method = freq3_test_wxl(args)
+        spectral_method.defense(args.result_file)
+    
 
-    result = spectral_method.defense(args.result_file)
+    # if "result_file" not in args.__dict__:
+    #     args.result_file = 'imagenette-320_blended_0'
+    # elif args.result_file is None:
+    #     args.result_file = 'imagenette-320_blended_0'
+    # spectral_method = freq3_test_wxl(args)
+    # spectral_method.defense(args.result_file)
+
+    # if "result_file" not in args.__dict__:
+    #     args.result_file = 'cifar10_ssba_0_1'
+    # elif args.result_file is None:
+    #     args.result_file = 'cifar10_ssba_0_1'
+    # if "yaml_path" not in args.__dict__:
+    #     args.yaml_path = './config/defense/freq_test_wxl/cifar10.yaml'
+    # elif args.yaml_path is None:
+    #     args.yaml_path = './config/defense/freq_test_wxl/cifar10.yaml'
+
+
+
+
+    # if "result_file" not in args.__dict__:
+    #     args.result_file = 'badnet_0_2'
+    # elif args.result_file is None:
+    #     args.result_file = 'badnet_0_2'
+    # if "yaml_path" not in args.__dict__:
+    #     args.yaml_path = './config/defense/freq_test_wxl/20-imagenet.yaml'
+    # elif args.yaml_path is None:
+    #     args.yaml_path = './config/defense/freq_test_wxl/20-imagenet.yaml'
+    # spectral_method = freq3_test_wxl(args)
+
+    # result = spectral_method.defense(args.result_file)

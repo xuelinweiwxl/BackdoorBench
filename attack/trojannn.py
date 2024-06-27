@@ -129,7 +129,7 @@ class TrojanNN(BadNet):
     def set_bd_args(cls, parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
 
         parser = add_common_attack_args(parser)
-        parser.add_argument("--pretrain_model_path", type=int, )
+        parser.add_argument("--pretrain_model_path", type=str, )
         parser.add_argument("--mask_path", type=str, help="path to the PIL Image mask")
         parser.add_argument("--selected_layer_name", type=str, help="which layer you choose")
         parser.add_argument("--selected_layer_param_name", type=str,

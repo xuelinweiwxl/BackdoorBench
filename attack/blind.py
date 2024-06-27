@@ -1581,7 +1581,7 @@ class Blind(BadNet):
             data_path=args.dataset_path,
             img_size=args.img_size,
             clean_data=args.dataset,
-            bd_train=None,
+            bd_train=bd_train_dataset_with_transform,
             bd_test=bd_test_dataset_with_transform,
             save_path=args.save_path,
         )

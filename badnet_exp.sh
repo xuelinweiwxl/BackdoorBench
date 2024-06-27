@@ -17,7 +17,6 @@
 #  --attack_trigger_img_path ../resource/blended/hello_kitty.jpeg \
 #  --save_folder_name cifar10_blended_0
 
-python ./attack/blended.py \
+python ./attack/badnet.py \
  --yaml_path ../config/attack/prototype/imagenette-320.yaml \
- --attack_trigger_img_path ../resource/blended/hello_kitty.jpeg \
- --save_folder_name imagenette-320_blended_0
+ --save_folder_name imagenette-320_badnet_0

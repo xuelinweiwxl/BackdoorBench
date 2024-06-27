@@ -15,13 +15,10 @@
 # shutdown –h now
 
 #run
-# python ./attack/trojannn.py \
+# python ./attack/prototype.py \
 #   --yaml_path ../config/attack/prototype/cifar10.yaml \
-#   --save_folder_name cifar10_trojannn_0 \
-#   --pretrain_model_path /data/wxl/code/BackdoorBench/record/cifar10_prototype/clean_model.pth
+#   --save_folder_name cifar10_prototype
 
-python ./attack/trojannn.py \
+python ./attack/prototype.py \
   --yaml_path ../config/attack/prototype/imagenette-320.yaml \
-  --save_folder_name imagenette-320_trojannn_0 \
-  --pretrain_model_path /data/wxl/code/BackdoorBench/record/imagenette-320_prototype/clean_model.pth
-
+  --save_folder_name imagenette-320_prototype

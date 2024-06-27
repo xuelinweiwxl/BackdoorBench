@@ -161,7 +161,6 @@ def load_attack_result(
     save_path : the path of "attack_result.pt"
     '''
     load_file = torch.load(save_path)
-
     if all(key in load_file for key in ['model_name',
         'num_classes',
         'model',

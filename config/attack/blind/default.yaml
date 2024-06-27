@@ -8,4 +8,4 @@ mgda_normalize: loss+
 fix_scale_normal_weight: 1.0
 fix_scale_backdoor_weight: 0.9
 batch_history_len: 1000
-backdoor_batch_loss_threshold: 1.0
+backdoor_batch_loss_threshold: 0.5

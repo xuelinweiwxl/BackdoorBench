@@ -3,17 +3,18 @@ pin_memory: True
 non_blocking: True
 prefetch: False
 amp: False
-
 device: cuda:0
 client_optimizer: sgd
-dataset: cifar10
+dataset: imagenette-320
 dataset_path: ../data
 frequency_save: 0
-batch_size: 128
-lr: 0.01
-lr_scheduler: CosineAnnealingLR
+batch_size: 32
+lr: 0.005
+lr_scheduler: ReduceLROnPlateau
 model: preactresnet18
 random_seed: 0
 sgd_momentum: 0.9
 wd: 0.0005
-epochs: 100
+# 130 epochs is enough for imagenette-320
+epochs: 130
+

@@ -105,6 +105,9 @@ def back_to_np_4d(inputs, args):
     elif args.dataset == "20-imagenet":
         expected_values = [0.485, 0.456, 0.406]
         variance = [0.229, 0.224, 0.225]
+    elif args.dataset == "imagenette-320":
+        expected_values = [0.485, 0.456, 0.406]
+        variance = [0.229, 0.224, 0.225]
     elif args.dataset == "tiny":
         expected_values = [0.4802, 0.4481, 0.3975]
         variance = [0.2302, 0.2265, 0.2262]
@@ -138,6 +141,9 @@ def np_4d_to_tensor(inputs, args):
         variance = [0.229, 0.224, 0.225]
     #WXL: add 20-imagenet
     elif args.dataset == "20-imagenet":
+        expected_values = [0.485, 0.456, 0.406]
+        variance = [0.229, 0.224, 0.225]
+    elif args.dataset == "imagenette-320":
         expected_values = [0.485, 0.456, 0.406]
         variance = [0.229, 0.224, 0.225]
     elif args.dataset == "tiny":

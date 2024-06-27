@@ -1,5 +1,5 @@
-device: 'cuda:1'
-amp: False
+device: 'cuda:0'
+amp: True
 pin_memory: True
 non_blocking: True
 prefetch: False
@@ -8,18 +8,18 @@ checkpoint_load:
 checkpoint_save:
 log:
 dataset_path: './data'
-dataset: 'cifar10'
+dataset: 'imagenette-320'
 
-epochs: 100
-batch_size: 256
+epochs: 130
+batch_size: 64
 num_workers: 4
-lr: 0.01
-lr_scheduler: CosineAnnealingLR
+lr: 0.005
+lr_scheduler: ReduceLROnPlateau
 model: 'preactresnet18'
 
 client_optimizer: 'sgd'
 sgd_momentum: 0.9 
-wd: 5.0e-4
+wd: 0.0005
 frequency_save: 0
 
 random_seed: 0
