@@ -169,5 +169,4 @@ cython_debug/
 #.idea/
 
 # this feature is under construction
-defense/FA_VAE/data
-defense/FA_VAE/favae_scripts/output
+defense/FA_VAE/
